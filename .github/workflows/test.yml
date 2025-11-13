@@ -1,0 +1,122 @@
+name: Test FlintMC
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Download Minecraft Server
+      run: |
+        mkdir -p minecraft-server
+        cd minecraft-server
+        # Download Paper MC 1.21.5 (or latest compatible version)
+        wget -O https://fill-data.papermc.io/v1/objects/aec002e77c7566e49494fdf05430b96078ffd1d7430e652d4f338fef951e7a10/paper-1.21.9-59.jar
+        echo "eula=true" > eula.txt
+
+    - name: Configure Minecraft Server
+      run: |
+        cd minecraft-server
+        cat > server.properties << EOF
+        enable-command-block=true
+        gamemode=creative
+        difficulty=peaceful
+        spawn-protection=0
+        max-players=10
+        online-mode=false
+        pvp=false
+        server-port=25565
+        view-distance=10
+        simulation-distance=10
+        level-type=flat
+        generator-settings={"layers":[{"block":"minecraft:bedrock","height":1},{"block":"minecraft:stone","height":2},{"block":"minecraft:grass_block","height":1}],"biome":"minecraft:plains"}
+        spawn-monsters=false
+        spawn-animals=false
+        spawn-npcs=false
+        EOF
+
+        # Create ops.json to give bot operator permissions
+        # The bot will connect with username "flintmc_bot" or similar
+        cat > ops.json << EOF
+        [
+          {
+            "uuid": "00000000-0000-0000-0000-000000000000",
+            "name": "flintmc_bot",
+            "level": 4,
+            "bypassesPlayerLimit": false
+          }
+        ]
+        EOF
+
+    - name: Start Minecraft Server
+      run: |
+        cd minecraft-server
+        java -Xmx2G -Xms1G -jar server.jar nogui &
+        SERVER_PID=$!
+        echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+
+        # Wait for server to start (look for "Done" message in logs)
+        echo "Waiting for server to start..."
+        timeout 120 bash -c 'until grep -q "Done" logs/latest.log 2>/dev/null; do sleep 2; done' || {
+          echo "Server failed to start within 120 seconds"
+          cat logs/latest.log
+          exit 1
+        }
+        echo "Server started successfully"
+        sleep 5
+
+    - name: Build FlintMC
+      run: cargo build --release
+
+    - name: Run FlintMC Tests
+      run: |
+        # Run all example tests
+        cargo run --release -- example_tests/ --server localhost:25565 --recursive
+      timeout-minutes: 10
+
+    - name: Stop Minecraft Server
+      if: always()
+      run: |
+        if [ ! -z "$SERVER_PID" ]; then
+          kill $SERVER_PID || true
+        fi
+        pkill -f "java.*server.jar" || true
+
+    - name: Upload Server Logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: minecraft-server-logs
+        path: minecraft-server/logs/
+        retention-days: 7
