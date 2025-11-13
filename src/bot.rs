@@ -179,11 +179,4 @@ impl TestBot {
             anyhow::bail!("Bot not connected")
         }
     }
-
-    pub async fn wait_ticks(&self, ticks: u32) -> Result<()> {
-        // In our timeline-based execution, we'll use /tick step instead
-        // This is a fallback for real-time waiting if needed
-        tokio::time::sleep(tokio::time::Duration::from_millis((ticks as u64) * 50)).await;
-        Ok(())
-    }
 }

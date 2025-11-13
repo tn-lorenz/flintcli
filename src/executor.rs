@@ -6,26 +6,20 @@ use std::collections::HashMap;
 
 pub struct TestExecutor {
     bot: TestBot,
-    offset: [i32; 3],
 }
 
 impl TestExecutor {
     pub fn new() -> Self {
         Self {
             bot: TestBot::new(),
-            offset: [0, 0, 0],
         }
     }
 
-    pub fn set_offset(&mut self, offset: [i32; 3]) {
-        self.offset = offset;
-    }
-
-    fn apply_offset(&self, pos: [i32; 3]) -> [i32; 3] {
+    fn apply_offset(&self, pos: [i32; 3], offset: [i32; 3]) -> [i32; 3] {
         [
-            pos[0] + self.offset[0],
-            pos[1] + self.offset[1],
-            pos[2] + self.offset[2],
+            pos[0] + offset[0],
+            pos[1] + offset[1],
+            pos[2] + offset[2],
         ]
     }
 
@@ -64,10 +58,9 @@ impl TestExecutor {
         // Clean all test areas before starting
         println!("{} Cleaning all test areas...", "→".blue());
         for (_test_idx, (test, offset)) in tests_with_offsets.iter().enumerate() {
-            self.set_offset(*offset);
             let region = test.cleanup_region();
-            let world_min = self.apply_offset(region[0]);
-            let world_max = self.apply_offset(region[1]);
+            let world_min = self.apply_offset(region[0], *offset);
+            let world_max = self.apply_offset(region[1], *offset);
             let cmd = format!(
                 "fill {} {} {} {} {} {} air",
                 world_min[0], world_min[1], world_min[2],
@@ -90,9 +83,8 @@ impl TestExecutor {
             if let Some(entries) = global_timeline.get(&current_tick) {
                 for (test_idx, entry, value_idx) in entries {
                     let (test, offset) = &tests_with_offsets[*test_idx];
-                    self.set_offset(*offset);
 
-                    match self.execute_action(current_tick, entry, *value_idx).await {
+                    match self.execute_action(current_tick, entry, *value_idx, *offset).await {
                         Ok(true) => {
                             test_results[*test_idx].0 += 1; // increment passed
                         }
@@ -127,10 +119,9 @@ impl TestExecutor {
         // Clean all test areas after completion
         println!("\n{} Cleaning up all test areas...", "→".blue());
         for (_test_idx, (test, offset)) in tests_with_offsets.iter().enumerate() {
-            self.set_offset(*offset);
             let region = test.cleanup_region();
-            let world_min = self.apply_offset(region[0]);
-            let world_max = self.apply_offset(region[1]);
+            let world_min = self.apply_offset(region[0], *offset);
+            let world_max = self.apply_offset(region[1], *offset);
             let cmd = format!(
                 "fill {} {} {} {} {} {} air",
                 world_min[0], world_min[1], world_min[2],
@@ -173,7 +164,13 @@ impl TestExecutor {
         Ok(results)
     }
 
+    #[allow(dead_code)]
     pub async fn run_test(&mut self, test: &TestSpec) -> Result<TestResult> {
+        self.run_test_with_offset(test, [0, 0, 0]).await
+    }
+
+    #[allow(dead_code)]
+    pub async fn run_test_with_offset(&mut self, test: &TestSpec, offset: [i32; 3]) -> Result<TestResult> {
         println!("\n{} {}", "Running test:".cyan().bold(), test.name.bold());
         if let Some(desc) = &test.description {
             println!("  {}", desc.dimmed());
@@ -184,8 +181,8 @@ impl TestExecutor {
 
         // Clean up test area before test
         let region = test.cleanup_region();
-        let world_min = self.apply_offset(region[0]);
-        let world_max = self.apply_offset(region[1]);
+        let world_min = self.apply_offset(region[0], offset);
+        let world_max = self.apply_offset(region[1], offset);
         println!("  {} Cleaning test area...", "→".blue());
         let cmd = format!(
             "fill {} {} {} {} {} {} air",
@@ -225,7 +222,7 @@ impl TestExecutor {
         while current_tick <= max_tick {
             if let Some(entries) = actions_by_tick.get(&current_tick) {
                 for (entry, value_idx) in entries {
-                    match self.execute_action(current_tick, entry, *value_idx).await {
+                    match self.execute_action(current_tick, entry, *value_idx, offset).await {
                         Ok(true) => {
                             passed += 1;
                         }
@@ -258,8 +255,8 @@ impl TestExecutor {
 
         // Clean up test area after test
         let region = test.cleanup_region();
-        let world_min = self.apply_offset(region[0]);
-        let world_max = self.apply_offset(region[1]);
+        let world_min = self.apply_offset(region[0], offset);
+        let world_max = self.apply_offset(region[1], offset);
         println!("\n  {} Cleaning up test area...", "→".blue());
         let cmd = format!(
             "fill {} {} {} {} {} {} air",
@@ -290,10 +287,10 @@ impl TestExecutor {
         })
     }
 
-    async fn execute_action(&mut self, tick: u32, entry: &TimelineEntry, value_idx: usize) -> Result<bool> {
+    async fn execute_action(&mut self, tick: u32, entry: &TimelineEntry, value_idx: usize, offset: [i32; 3]) -> Result<bool> {
         match &entry.action_type {
             ActionType::Place { pos, block } => {
-                let world_pos = self.apply_offset(*pos);
+                let world_pos = self.apply_offset(*pos, offset);
                 let cmd = format!("setblock {} {} {} {}", world_pos[0], world_pos[1], world_pos[2], block);
                 self.bot.send_command(&cmd).await?;
                 println!(
@@ -310,7 +307,7 @@ impl TestExecutor {
 
             ActionType::PlaceEach { blocks } => {
                 for placement in blocks {
-                    let world_pos = self.apply_offset(placement.pos);
+                    let world_pos = self.apply_offset(placement.pos, offset);
                     let cmd = format!(
                         "setblock {} {} {} {}",
                         world_pos[0], world_pos[1], world_pos[2], placement.block
@@ -331,8 +328,8 @@ impl TestExecutor {
             }
 
             ActionType::Fill { region, with } => {
-                let world_min = self.apply_offset(region[0]);
-                let world_max = self.apply_offset(region[1]);
+                let world_min = self.apply_offset(region[0], offset);
+                let world_max = self.apply_offset(region[1], offset);
                 let cmd = format!(
                     "fill {} {} {} {} {} {} {}",
                     world_min[0], world_min[1], world_min[2],
@@ -356,7 +353,7 @@ impl TestExecutor {
             }
 
             ActionType::Remove { pos } => {
-                let world_pos = self.apply_offset(*pos);
+                let world_pos = self.apply_offset(*pos, offset);
                 let cmd = format!("setblock {} {} {} air", world_pos[0], world_pos[1], world_pos[2]);
                 self.bot.send_command(&cmd).await?;
                 println!(
@@ -375,7 +372,7 @@ impl TestExecutor {
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
                 for check in checks {
-                    let world_pos = self.apply_offset(check.pos);
+                    let world_pos = self.apply_offset(check.pos, offset);
                     let actual_block = self.bot.get_block(world_pos).await?;
 
                     let expected_name = check.is.trim_start_matches("minecraft:");
@@ -416,7 +413,7 @@ impl TestExecutor {
                 // Wait a moment for server to send block update
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-                let world_pos = self.apply_offset(*pos);
+                let world_pos = self.apply_offset(*pos, offset);
                 let actual_value = self.bot.get_block_state_property(world_pos, state).await?;
                 let expected_value = &values[value_idx];
 
@@ -457,7 +454,9 @@ impl TestExecutor {
 #[derive(Debug)]
 pub struct TestResult {
     pub test_name: String,
+    #[allow(dead_code)]
     pub passed: usize,
+    #[allow(dead_code)]
     pub failed: usize,
     pub success: bool,
 }
