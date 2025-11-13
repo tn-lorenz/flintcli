@@ -1,28 +1,35 @@
 use azalea::prelude::*;
 use anyhow::Result;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use parking_lot::RwLock;
 
 #[derive(Clone, Component)]
 struct State {
     client_handle: Arc<RwLock<Option<Client>>>,
+    in_game: Arc<AtomicBool>,
 }
 
 impl Default for State {
     fn default() -> Self {
         Self {
             client_handle: Arc::new(RwLock::new(None)),
+            in_game: Arc::new(AtomicBool::new(false)),
         }
     }
 }
 
 pub struct TestBot {
     client: Option<Arc<RwLock<Option<Client>>>>,
+    in_game: Option<Arc<AtomicBool>>,
 }
 
 impl TestBot {
     pub fn new() -> Self {
-        Self { client: None }
+        Self {
+            client: None,
+            in_game: None,
+        }
     }
 
     pub async fn connect(&mut self, server: &str) -> Result<()> {
@@ -32,15 +39,23 @@ impl TestBot {
 
         let state = State::default();
         let client_handle = state.client_handle.clone();
+        let in_game = state.in_game.clone();
 
         // Spawn the bot in a background task
         let server_owned = server.to_string();
         tokio::spawn(async move {
             async fn handler(bot: Client, event: Event, state: State) -> anyhow::Result<()> {
-                // Store the client on first init
-                if matches!(event, Event::Init) {
-                    *state.client_handle.write() = Some(bot.clone());
-                    tracing::info!("Bot initialized and ready");
+                match event {
+                    Event::Init => {
+                        *state.client_handle.write() = Some(bot.clone());
+                        tracing::info!("Bot initialized");
+                    }
+                    Event::Login => {
+                        // Login event means we're fully in the game state
+                        state.in_game.store(true, Ordering::SeqCst);
+                        tracing::info!("Bot in game state");
+                    }
+                    _ => {}
                 }
                 Ok(())
             }
@@ -68,11 +83,25 @@ impl TestBot {
             anyhow::bail!("Failed to initialize bot connection");
         }
 
-        self.client = Some(client_handle);
-        tracing::info!("Connected successfully");
+        // Wait for bot to be in game state
+        tracing::info!("Waiting for bot to enter game state...");
+        for _ in 0..100 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            if in_game.load(Ordering::SeqCst) {
+                break;
+            }
+        }
 
-        // Give extra time for bot to fully join the game
-        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+        if !in_game.load(Ordering::SeqCst) {
+            anyhow::bail!("Bot failed to enter game state within timeout");
+        }
+
+        self.client = Some(client_handle);
+        self.in_game = Some(in_game);
+        tracing::info!("Connected successfully and in game state");
+
+        // Give a small amount of extra time for world data to sync
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
         Ok(())
     }

@@ -66,19 +66,6 @@ jobs:
         spawn-npcs=false
         EOF
 
-        # Create ops.json to give bot operator permissions
-        # The bot connects as "FlintMC_TestBot" (see bot.rs)
-        cat > ops.json << EOF
-        [
-          {
-            "uuid": "00000000-0000-0000-0000-000000000000",
-            "name": "FlintMC_TestBot",
-            "level": 4,
-            "bypassesPlayerLimit": false
-          }
-        ]
-        EOF
-
         # Create spigot.yml to disable spam filter completely
         # This prevents "disconnect.spam" kicks when running multiple commands rapidly
         cat > spigot.yml << EOF
@@ -90,9 +77,12 @@ jobs:
     - name: Start Minecraft Server
       run: |
         cd minecraft-server
-        java -Xmx2G -Xms1G -jar server.jar nogui &
+        # Start server with named pipe for console input
+        mkfifo server_input
+        tail -f server_input | java -Xmx2G -Xms1G -jar server.jar nogui &
         SERVER_PID=$!
         echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+        exec 3>server_input  # Open pipe for writing
 
         # Wait for server to start (look for "Done" message in logs)
         echo "Waiting for server to start..."
@@ -102,7 +92,12 @@ jobs:
           exit 1
         }
         echo "Server started successfully"
-        sleep 5
+        sleep 2
+
+        # Op the bot player
+        echo "op FlintMC_TestBot" >&3
+        echo "Sent op command for FlintMC_TestBot"
+        sleep 2
 
     - name: Build FlintMC
       run: cargo build --release
