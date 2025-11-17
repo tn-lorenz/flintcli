@@ -1,6 +1,13 @@
-# FlintMC
+# FlintCLI
 
-A Minecraft server testing framework written in Rust using Azalea. Tests are specified in JSON and executed deterministically using Minecraft's `/tick` command.
+A command-line interface for running [Flint](https://github.com/FlintTestMC/flint-core) tests against Minecraft servers. FlintCLI uses Azalea to connect to servers and execute tests deterministically using Minecraft's `/tick` command.
+
+## About Flint
+
+**Flint** is a Minecraft testing framework that consists of two main components:
+
+- **[flint-core](https://github.com/FlintTestMC/flint-core)**: The core library containing test specifications, parsers, test loading, and spatial utilities. This is the foundation that can be integrated into various tools and environments.
+- **FlintCLI** (this project): A CLI tool that uses `flint-core` to run tests against live Minecraft servers via the Azalea bot framework.
 
 ## Features
 
@@ -203,23 +210,32 @@ See the `example_tests/` directory for examples:
 
 ## How It Works
 
-1. Bot connects to server in spectator mode
-2. Test timeline is constructed from JSON
-3. Server time is frozen with `/tick freeze`
-4. Actions are grouped by tick and executed
-5. Between tick groups, `/tick step 1` advances time
-6. Azalea tracks world state from server updates
-7. Assertions verify expected block states
-8. Results are collected and reported
+1. `flint-core` loads and parses test JSON files
+2. Bot connects to server in spectator mode via Azalea
+3. Tests are spatially offset to run in parallel without interference
+4. Server time is frozen with `/tick freeze`
+5. Actions are grouped by tick and executed
+6. Between tick groups, `/tick step 1` advances time
+7. Azalea tracks world state from server updates
+8. Assertions verify expected block states
+9. Results are collected and reported
 
 ## Architecture
 
+FlintCLI is built on top of `flint-core` and focuses on Minecraft server integration:
+
 ```
+FlintCLI (this repo):
 src/
-├── main.rs       - CLI and test runner
-├── test_spec.rs  - JSON parsing and test specification
-├── bot.rs        - Azalea bot controller
-└── executor.rs   - Test execution and timeline management
+├── main.rs      - CLI argument parsing and test orchestration
+├── bot.rs       - Azalea bot controller and server connection
+└── executor.rs  - Test execution and timeline management via Azalea
+
+flint-core (dependency):
+- Test specification and JSON parsing
+- Test file discovery and loading
+- Spatial offset calculation for parallel tests
+- Core test primitives and actions
 ```
 
 ## License
